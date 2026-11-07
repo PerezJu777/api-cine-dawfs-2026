@@ -25,3 +25,14 @@ jobs:
 
       - name: ejecutar-pruebas
         run: npm test
+
+  docker:
+    needs: pruebas
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: docker-build
+        uses: docker build -f ./Dockerfile -t $IMAGEN .
