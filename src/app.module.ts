@@ -28,7 +28,8 @@ import { AuthModule } from './modules/auth/auth.module';
       password: process.env.DB_PASSWORD,
       entities: [__dirname + '/**/*.entity{.ts}'],
       autoLoadEntities: true,
-      logging: true
+      logging: true,
+      synchronize: process.env.DB_SYNCHRONIZE === 'true' ? true : false,
     }),
     PersonaModule,
     ReservasModule,

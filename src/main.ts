@@ -7,8 +7,14 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const logger = new Logger('Bootstrap');
 
+  const cors = process.env.CORS_ORIGIN == '*' ? true : (
+    process.env.CORS_ORIGIN?.split(',').map(dominio => dominio.trim())
+  );
+
+  console.log('CORS_ORIGIN:', cors);
+
   app.enableCors({
-    origin: true,
+    origin: cors,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
     credentials: true,
     allowedHeaders: 'Content-Type, Accept, Authorization',
@@ -39,7 +45,9 @@ async function bootstrap() {
   const documento = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('documentacion', app, documento);
 
-  await app.listen(process.env.PORT ?? 3000);
+  const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+  await app.listen(port, '0.0.0.0');
+
   logger.log(`La aplicación está corriendo en: ${await app.getUrl()}`);
 }
 bootstrap();
