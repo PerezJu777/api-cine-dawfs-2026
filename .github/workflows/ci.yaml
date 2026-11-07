@@ -1,6 +1,8 @@
+name: CI pruebas
+
 on:
   push:
-    branches: [main]
+    branches: [master]
 
 env:
   IMAGEN: ${{ secrets.DOCKER_USERNAME }}/api-cine:${{ github.sha }}
