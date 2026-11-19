@@ -32,16 +32,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
+      
       - name: docker-build
         run: docker build -f ./Dockerfile -t "$IMAGEN" .
-
+      
       - name: Iniciar sesion en Docker Hub
         uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
-
+        
       - name: Construir y subir imagen
         run: |
           docker push "$IMAGEN"
