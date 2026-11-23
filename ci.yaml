@@ -1,0 +1,101 @@
+name: CI Pruebas
+
+on:
+  push:
+    branches: [master]
+
+env:
+  IMAGEN: ${{ secrets.DOCKER_USERNAME }}/api-cine:${{ github.sha }}
+
+jobs:
+  pruebas:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Ejecutar pruebas
+        run: npm test
+
+  docker:
+    needs: pruebas
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: docker-build
+        run: docker build -f ./Dockerfile -t "$IMAGEN" .
+      
+      - name: Iniciar sesion en Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+        
+      - name: Construir y subir imagen
+        run: |
+          docker push "$IMAGEN"
+          echo "Imagen subida a Docker Hub: $IMAGEN"
+
+  despliegue:
+    # Solo se despliega si la imagen ya esta en Docker Hub
+    needs: docker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Desplegar en el servidor por SSH
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          # Variables que se pasan al servidor para usarlas en el script
+          envs: IMAGEN,DOCKER_USERNAME,DOCKER_PASSWORD
+          script: |
+            set -e
+            CONTENEDOR=cine-api
+            RED=cine-red
+
+            # El repo de Docker Hub puede ser privado: el servidor tambien inicia sesion
+            echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+
+            echo "Descargando $IMAGEN"
+            docker pull "$IMAGEN"
+
+            # Red compartida con postgres; se crea solo la primera vez
+            docker network inspect "$RED" >/dev/null 2>&1 || docker network create "$RED"
+
+            if docker ps -a --format '{{.Names}}' | grep -qx "$CONTENEDOR"; then
+              echo "Deteniendo el contenedor actual"
+              docker stop "$CONTENEDOR"
+              docker rm "$CONTENEDOR"
+            fi
+
+            # Los secretos (JWT_SECRET, DB_*) NO van en la imagen: se leen de
+            # ~/cine/api.env en el servidor. Sin ese archivo la API no arranca.
+            docker run -d \
+              --name "$CONTENEDOR" \
+              --restart unless-stopped \
+              --network "$RED" \
+              --env-file "$HOME/cine/api-cine-dip/.env" \
+              --read-only --tmpfs /tmp \
+              -v cine_api_uploads:/app/estatico/imagenes \
+              -p 3000:3000 \
+              "$IMAGEN"
+
+            docker logout
+            # Borra imagenes viejas para no llenar el disco
+            # docker image prune -f

@@ -32,16 +32,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      
+
       - name: docker-build
         run: docker build -f ./Dockerfile -t "$IMAGEN" .
-      
+
       - name: Iniciar sesion en Docker Hub
         uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
-        
+
       - name: Construir y subir imagen
         run: |
           docker push "$IMAGEN"
@@ -57,26 +57,67 @@ jobs:
         env:
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
           # Variables que se pasan al servidor para usarlas en el script
-          envs: IMAGEN,DOCKER_USERNAME,DOCKER_PASSWORD
+          envs: IMAGEN,DOCKER_USERNAME,DOCKER_PASSWORD,POSTGRES_USER,POSTGRES_PASSWORD,POSTGRES_DB
           script: |
             set -e
+            CONTENEDOR_DB=cine-postgres
             CONTENEDOR=cine-api
             RED=cine-red
+
+            mkdir -p "$HOME/cine/postgres-prod"
+
+            cat << 'EOF' > "$HOME/cine/postgres-prod/init-schemas.sql"
+            CREATE SCHEMA IF NOT EXISTS cartelera;
+            CREATE SCHEMA IF NOT EXISTS ventas;
+            CREATE SCHEMA IF NOT EXISTS identidad;
+            CREATE SCHEMA IF NOT EXISTS seguridad;
+            EOF
 
             # El repo de Docker Hub puede ser privado: el servidor tambien inicia sesion
             echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
 
-            echo "Descargando $IMAGEN"
+            echo "Descargando $IMAGEN y postgres:16-alpine"
+            docker pull postgres:16-alpine
             docker pull "$IMAGEN"
 
-            # Red compartida con postgres; se crea solo la primera vez
+            # Red compartida entre postgres y api; se crea solo la primera vez
             docker network inspect "$RED" >/dev/null 2>&1 || docker network create "$RED"
+
+            # Levantar postgres si aun no existe o no esta corriendo
+            if ! docker ps -a --format '{{.Names}}' | grep -qx "$CONTENEDOR_DB"; then
+              echo "Creando contenedor de PostgreSQL"
+              docker run -d \
+                --name "$CONTENEDOR_DB" \
+                --restart unless-stopped \
+                --network "$RED" \
+                -e POSTGRES_USER="$POSTGRES_USER" \
+                -e POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
+                -e POSTGRES_DB="$POSTGRES_DB" \
+                -v cine_pgdata:/var/lib/postgresql/data \
+                -v "$HOME/cine/postgres-prod/init-schemas.sql:/docker-entrypoint-initdb.d/init-schemas.sql" \
+                postgres:16-alpine
+            elif ! docker ps --format '{{.Names}}' | grep -qx "$CONTENEDOR_DB"; then
+              echo "Iniciando contenedor existente de PostgreSQL"
+              docker start "$CONTENEDOR_DB"
+            fi
+
+            echo "Esperando a que PostgreSQL este listo..."
+            for i in $(seq 1 30); do
+              if docker exec "$CONTENEDOR_DB" pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1; then
+                echo "PostgreSQL listo."
+                break
+              fi
+              sleep 2
+            done
 
             if docker ps -a --format '{{.Names}}' | grep -qx "$CONTENEDOR"; then
               echo "Deteniendo el contenedor actual"
@@ -84,8 +125,8 @@ jobs:
               docker rm "$CONTENEDOR"
             fi
 
-            # Los secretos (JWT_SECRET, DB_*) NO van en la imagen: se leen de
-            # ~/cine/api.env en el servidor. Sin ese archivo la API no arranca.
+            # Los secretos (JWT_SECRET, DB_*) NO van en la imagen: se leen del
+            # archivo .env en el servidor. Sin ese archivo la API no arranca.
             docker run -d \
               --name "$CONTENEDOR" \
               --restart unless-stopped \
@@ -97,5 +138,3 @@ jobs:
               "$IMAGEN"
 
             docker logout
-            # Borra imagenes viejas para no llenar el disco
-            # docker image prune -f
