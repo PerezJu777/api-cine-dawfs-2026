@@ -70,7 +70,7 @@ jobs:
           script: |
             set -e
             CONTENEDOR_DB=postgres-cine-prod
-            CONTENEDOR=cine-api
+            CONTENEDOR=api-cine-prod
             RED=cine-red
 
             mkdir -p "$HOME/cine/postgres-prod"
