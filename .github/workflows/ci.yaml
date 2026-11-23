@@ -55,22 +55,22 @@ jobs:
       - name: Desplegar en el servidor por SSH
         uses: appleboy/ssh-action@v1.2.0
         env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_PASSWORD: ${{ secrets.DOCKERHUB_PASSWORD }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKERHUB_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
           # Variables que se pasan al servidor para usarlas en el script
-          envs: IMAGEN,DOCKERHUB_USERNAME,DOCKERHUB_PASSWORD
+          envs: IMAGEN,DOCKER_USERNAME,DOCKER_PASSWORD
           script: |
             set -e
             CONTENEDOR=cine-api
             RED=cine-red
 
             # El repo de Docker Hub puede ser privado: el servidor tambien inicia sesion
-            echo "$DOCKERHUB_PASSWORD" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
+            echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
 
             echo "Descargando $IMAGEN"
             docker pull "$IMAGEN"
@@ -99,4 +99,3 @@ jobs:
             docker logout
             # Borra imagenes viejas para no llenar el disco
             # docker image prune -f
-            
