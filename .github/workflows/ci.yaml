@@ -90,7 +90,7 @@ jobs:
               --name "$CONTENEDOR" \
               --restart unless-stopped \
               --network "$RED" \
-              --env-file "$HOME/cine/api.env" \
+              --env-file "$HOME/cine/api-cine-dip/.env" \
               --read-only --tmpfs /tmp \
               -v cine_api_uploads:/app/estatico/imagenes \
               -p 3000:3000 \
