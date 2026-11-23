@@ -46,3 +46,56 @@ jobs:
         run: |
           docker push "$IMAGEN"
           echo "Imagen subida a Docker Hub: $IMAGEN"
+
+  despliegue:
+    # Solo se despliega si la imagen ya esta en Docker Hub
+    needs: docker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Desplegar en el servidor por SSH
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_PASSWORD: ${{ secrets.DOCKERHUB_PASSWORD }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          # Variables que se pasan al servidor para usarlas en el script
+          envs: IMAGEN,DOCKERHUB_USERNAME,DOCKERHUB_PASSWORD
+          script: |
+            set -e
+            CONTENEDOR=cine-api
+            RED=cine-red
+
+            # El repo de Docker Hub puede ser privado: el servidor tambien inicia sesion
+            echo "$DOCKERHUB_PASSWORD" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
+
+            echo "Descargando $IMAGEN"
+            docker pull "$IMAGEN"
+
+            # Red compartida con postgres; se crea solo la primera vez
+            docker network inspect "$RED" >/dev/null 2>&1 || docker network create "$RED"
+
+            if docker ps -a --format '{{.Names}}' | grep -qx "$CONTENEDOR"; then
+              echo "Deteniendo el contenedor actual"
+              docker stop "$CONTENEDOR"
+              docker rm "$CONTENEDOR"
+            fi
+
+            # Los secretos (JWT_SECRET, DB_*) NO van en la imagen: se leen de
+            # ~/cine/api.env en el servidor. Sin ese archivo la API no arranca.
+            docker run -d \
+              --name "$CONTENEDOR" \
+              --restart unless-stopped \
+              --network "$RED" \
+              --env-file "$HOME/cine/api.env" \
+              --read-only --tmpfs /tmp \
+              -v cine_api_uploads:/app/estatico/imagenes \
+              -p 3000:3000 \
+              "$IMAGEN"
+
+            docker logout
+            # Borra imagenes viejas para no llenar el disco
+            # docker image prune -f
